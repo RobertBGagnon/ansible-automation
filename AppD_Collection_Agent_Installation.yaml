@@ -1,0 +1,27 @@
+---
+- hosts: all
+  tasks:
+    - include_role:
+        name: appdynamics.agents.machine
+      vars:
+        # Define Agent Type and Version
+        agent_version: 23.9.1
+        agent_type: machine
+        machine_hierarchy: "RJGApp|RJGOwners|Environment|" # Make sure it ends with a |
+        sim_enabled: "true"
+        # Analytics settings
+        #RJG analytics_event_endpoint: "https://edmontoncityof-non-prod.saas.appdynamics.com:443"
+        enable_analytics_agent: "false"
+        # Your controller details
+        controller_account_access_key: "be747e6e-59a9-42dc-8ae8-da74533007bd" # Please add this to your Vault
+        controller_host_name: "edmontoncityof-non-prod.saas.appdynamics.com" # Your AppDynamics controller
+        controller_account_name: "edmontoncityof-non-prod" # Please add this to your Vault
+        enable_ssl: "true"
+        controller_port: "443"
+        #RJG controller_global_analytics_account_name: 'customer1_e52eb4e7-25d2-41c4-a5bc-9685502317f2' # Please add this to your Vault
+        # config properties docs - https://docs.appdynamics.com/display/latest/Machine+Agent+Configuration+Properties
+        # Can be used to configure the proxy for the agent
+        #RJG java_system_properties: "-Dappdynamics.http.proxyHost=10.0.4.2 -Dappdynamics.http.proxyPort=9090" # mind the space between each property
+        java_system_properties: "-Dappdynamics.agent.uniqueHostId=HRZ-P-C0005_RJG" # mind the space between each property #RJG
+        #agent_unique_host_id: "HRZ-P-C0005_RJG" #RJG
+        #become: yes #RJG

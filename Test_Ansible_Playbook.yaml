@@ -1,0 +1,84 @@
+---
+# Remember to get Commit and Sync and then get the latest SCM revision for the Project in Ansible Tower if any changes are made to this playbook.
+- hosts: all
+  #become: yes
+
+  vars:
+    #next step - replaces the following "vars" with job template vars.
+    #installMediaDir: '\\HRZ-P-W0009\C$\Users\rgagnon\Desktop\AppD_Resources\Install_Packages\'
+    #installMediaFile: 'machineagent-bundle-64bit-windows.zip'
+    #copyDestDir: 'C:\Users\rgagnon\Desktop\AppDynamics\MachineAgent\'
+    #installFullFilePath: '{{ copyDestDir }}{{ installMediaFile }}'
+
+  tasks:
+    # - name: Display all variables/facts known for a host
+    #   debug:
+    #     var: hostvars["HRZ-P-C0005.COE.ADS"]
+    #   tags: debug_info
+
+  - name: Copy Source Media
+    become: yes
+    win_copy:
+      remote_src: true
+      src: '{{ installMediaDir }}{{ installMediaFile }}'
+      dest: '{{ copyDestDir }}'
+
+  - name: Check if source media was copied.
+    win_stat:
+      path: '{{ installFullFilePath }}'
+    register: file_check
+
+  - block:
+    - name: Source media exists
+      debug:
+        msg: "The source media has been successfully copied to {{ installFullFilePath }}."
+
+    # The following unzip process is not idempotent and will just extract the archive and report a "change".
+    # May want to consider doing an existence check for a specific file if there is concern with the above.
+    - name: Unzip media to install directory
+      #community.windows.win_unzip:
+      win_unzip:
+        src: '{{ installFullFilePath }}'
+        dest: '{{ copyDestDir }}'
+        recurse: no
+        delete_archive: yes
+
+    # Update the XML configuration file with CoE-specific values
+    - name: Using dict2items
+      #community.windows.win_xml
+      win_xml:
+        path: '{{ copyDestDir }}conf\controller-info.xml'
+        backup: true
+        #xpath: /controller-info/controller-host
+        xpath: '{{ item.key }}'
+        #fragment: 'edmontoncityof-non-prod.saas.appdynamics.com'
+        fragment: '{{ item.value }}'
+        type: text
+      loop: '{{ ma_controller_config_vars | dict2items }}'
+
+    - name: UT8-BOM to UTF8 Clean up.
+      # Need to use the following PowerShell hack to work around the fact that PowerShell (which is leveraged by win_xml)
+      # saves an XML file format as UTF8-BOM and this causes issues for the AppDynamics configuration reader.  This will
+      # remove the BOM bytes from the file leaving it as a UTF8 file.
+      # See post - https://stackoverflow.com/questions/63476408/powershell-xmldocument-save-as-utf-8-without-bom/63479246#63479246
+      win_shell: |      
+        [xml]$appDConfig = Get-Content '{{ copyDestDir }}conf\controller-info.xml';
+        $appDConfig.ChildNodes[0].Encoding = $null
+        $appDConfig.Save('{{ copyDestDir }}conf\controller-info.xml');
+
+
+    # CHECK - validate all parms were written.  New config file versions are back compat with older and no new parms needed.
+    - name: Run the vbscript to install the machine agent as a service (requires elevation).
+      # Note: The vendor-provided script installs the service AND starts it so this task action should only follow successful
+      #       configuration of the controller-info.xml file.
+      win_shell:
+        start-process -FilePath "cmd.exe" -ArgumentList "/c cscript {{ copyDestDir }}\InstallService.vbs //nologo <NUL" -Wait -Passthru 
+
+    when: file_check.stat.exists
+
+
+  - name: Source media does not exist
+    debug:
+      msg: "The source media copy to {{ copyDestDir }} failed."
+    when: not file_check.stat.exists
+

@@ -1,0 +1,91 @@
+---
+# Remember to get Commit and Sync and then get the latest SCM revision for the Project in Ansible Tower if any changes are made to this playbook.
+- hosts: HRZ-P-C0005.COE.ADS # This is a precaution - can set to "All" if the Ansible job configures the host targets.
+  tasks:
+  - name: AppDynamics Agent Installation
+    vars:
+      ansible_become_user: "{{ test_user }}"
+      ansible_become_pass: "{{ test_pass }}"
+    #  ansible_become_pass: {{ ansible_pass }}
+    #become: true - Ansible Error: The powershell shell family is incompatible with the sudo become plugin"
+    win_shell: |
+      $_installMediaDir = "\\HRZ-P-W0009\C$\Users\rgagnon\Desktop\AppD_Resources\Install_Packages"
+      $_installMediaFile = "machineagent-bundle-64bit-windows.zip"
+      $_installDir = "C:\Users\rgagnon\Desktop\AppDynamics\MachineAgent"
+      $_coeCfgFile = "AppD_Non-Prod_CoE_Values.xml"
+
+      # Check if the install directory exists and if not, create it.
+      $exist = Test-Path -Path $_installDir
+      if (-not $exist) {
+        New-Item $_installDir -ItemType Directory
+      }
+      Set-Location $_installDir;
+
+      if ( $true )
+      {
+      ## Could check here first if machineagent.jar exists and query user to continue.
+
+      ### Not downloading directly from AppD but rather pulling from a CoE shared drive ***
+      ## Download the Machine Agent zip from accounts.appdynamics.com and rename it.
+      #Invoke-WebRequest -H @{'Authorization' = 'Bearer eyJraWQiOiJoOXF4c3ZWOGRfaWZWd2ZaeW10eWdfSmg3dGNTWmhiUE9SSi1reF9rUzkwIiwiYWxnIjoiUlMyNTYifQ.eyJ2ZXIiOjEsImp0aSI6IkFULmpNZTlycnJQS2tlU1o1SUo2empTTHhQYnY1MkVVb200X1hTTVI1aVoyWVUub2FyMjZpc3lhcjBqR2RCdkgycDciLCJpc3MiOiJodHRwczovL2FwcGQtaWRlbnRpdHkub2t0YS5jb20vb2F1dGgyL2F1c3B2bnAzdmtrclNIMk9RMnA2IiwiYXVkIjoibWljb3JzZXJ2aWNlcyIsImlhdCI6MTY4Njc2NDE3MSwiZXhwIjoxNjg2ODUwNTcxLCJjaWQiOiIwb2ExanMxMHQ3ekJjTENnRzJwNyIsInVpZCI6IjAwdWllZ2lhbjk0ZUVzVTd4MnA3Iiwic2NwIjpbIm9mZmxpbmVfYWNjZXNzIiwiZG93bmxvYWQiLCJvcGVuaWQiXSwiYXV0aF90aW1lIjoxNjg2NzY0MTEwLCJzdWIiOiJyb2JlcnQuZ2Fnbm9uQGVkbW9udG9uLmNhIn0.rAJlS84IF4XNDl69HqTVmGdXJkv1bI33_5Nvkhv_dlpBu2oSmyi-Ki9GXvwN1pNBD19fwxBtSuzgoILu6tQZYoqV2DT2AHNk8l3NP5jWodzF5v9Qa7tyO8Se7L5zIw6M3uB0jhslCAzA524icPjL5hnqUruiHHU5CHzwD5uB-eV-jkhSXANNad7XawPGNc8xG8GbdKuEBDQ7Nw8EAQnhlZs8jTZBN4TS7TXQKPB5RHxvS9mxyLKtEkMxnhvQzsB-sEIKbOCWdMB0I9pLt8Styso8ob53hUoV8hRxFcE2XvnXBnppXkz2YNH-7dNyJl0fSqGb4RVZ6iyAPuDoPEvzxQ;'} -Uri "https://download.appdynamics.com/download/prox/download-file/machine-bundle/23.5.0.3620/machineagent-bundle-64bit-windows-23.5.0.3620.zip" -OutFile $_installMediaFilee
+
+      Copy-Item "$($_installMediaDir)\$($_installMediaFile)" .
+      # Check if the zip file exists and if so, unzip it.
+      $exist = Test-Path -Path $_installDir\$($_installMediaFile) -PathType Leaf
+      if ($exist) {
+        Expand-Archive -Path $_installMediaFile -DestinationPath .
+      }
+      }
+
+      # Run the vbscript to install the machine agent as a service (requires elevation).
+      start-process -FilePath "cmd.exe" -ArgumentList "/c cscript $($_installDir)\InstallService.vbs //nologo <NUL" -Wait -Passthru 
+      
+      # Check that the Machine Agent configuration file exists and if so copy the CoE configuration file into the same directory
+      $maCfgDir = "conf"
+      $exist = Test-Path -Path $maCfgDir
+      $maCfgDirExists = $exist
+      if ($maCfgDirExists) {
+        Set-Location $maCfgDir;
+        $appDConfDirFullPath = Get-Location
+        # Check if the Machine Agent configuration file exists.
+        $maCfgFile = "controller-info.xml"
+        $exist = Test-Path -Path $maCfgFile -PathType Leaf
+        if ($exist) {
+          # Create a DOM object to more easily inject the COE-specific values
+          [xml]$appDConfig = Get-Content $maCfgFile;
+
+          # Copy the CoE configuration file to the local directory
+          $coeConfigFile = "$($_installMediaDir)\$($_coeCfgFile)"
+          #Copy-Item $coeConfigFile .
+          # Create a DOM object to more easily read the COE-specific values
+          [xml]$coeValueConfig = Get-Content $coeConfigFile
+            
+          # Backup the Machine Agent configuration file
+          [string]$backupFile = $maCfgFile.Substring(0, $maCfgFile.LastIndexOf('.')) + (Get-Date).tostring(“_yyyyMMddTHHmmss”) + ".xml"
+          Copy-Item $maCfgFile $backupFile
+          # Remove any backups older than 7 days
+          Get-ChildItem –Path "$($appDConfDirFullPath)\*" -Include "*.xml" | Where-Object {($_.LastWriteTime -lt (Get-Date).AddDays(-7))} | Remove-Item
+            
+          $coeController = $coeValueConfig.SelectSingleNode("/coe-values/machine-agent/controller-info");
+          $appDController = $appDConfig.SelectSingleNode("/controller-info");
+
+          # Update the freshly installed machine agent controller xml file with values from the coeController xml file.
+          foreach ($node in $coeController.ChildNodes)
+          {
+            # Process nodes in the CoE value file skipping any comment (<!-- -->) nodes.
+            if (-not ($node.Name -eq "#comment") )
+            {
+              $appDController[$node.Name].InnerText = $coeController[$node.Name].InnerText;
+            }
+          }
+          $appDConfig.ChildNodes[0].Encoding = $null
+          $appDConfig.Save("$($appDConfDirFullPath)\$($maCfgFile)");
+
+          # Start the Machine Agent Service (note: before this is made a production script we really need to do a whole lot of validation above)
+          # - Files not being copied successfully
+          # - start-process completion monitoring
+          # - check if service is already installed (uninstall it?)
+          # - validation service has been installed
+          Start-Service -Name $serviceName
+        }
+      }
